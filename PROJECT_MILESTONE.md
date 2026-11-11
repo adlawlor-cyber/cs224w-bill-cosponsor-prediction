@@ -1,5 +1,5 @@
 # Predicting Bill Advancement and Cosponsorship with Graph Deep Learning on Congress.gov Data
-
+test update
 **Project milestone (first draft of the final report)** · CS224W, Fall 2026
 Andrew Lawlor (`adlawlor@stanford.edu`) · Alex Rivas (`alex502@stanford.edu`)
 
