@@ -3,7 +3,7 @@
 **Project milestone (first draft of the final report)** · CS224W, Fall 2026
 Andrew Lawlor (`adlawlor@stanford.edu`) · Alex Rivas (`alex502@stanford.edu`)
 
-> **TL;DR.** We turned 20 years of U.S. Congress records (Congresses 108–118, about 154,000 bills and 1.9 million cosponsorships) into a leak-free temporal graph. On it we set up two prediction tasks: **will a bill advance out of committee**, and **who will cosponsor it next**. This milestone establishes strong baselines for both: simple heuristics, tabular models, and three GNNs (HeteroSAGE, R-GCN, LightGCN). The GNNs beat every heuristic by about 30% on cosponsor prediction. On bill advancement, a tabular model on the bill's own features is as strong as the GNNs. The next phase of the project is to make the graph earn its keep.
+> **TL;DR.** We turned 20 years of U.S. Congress records (Congresses 108–118, about 154,000 bills and 1.9 million cosponsorships) into a leak-free temporal graph. On it we set up two prediction tasks: **will a bill advance out of committee**, and **who will cosponsor it next**. This milestone establishes strong baselines for both: simple heuristics, tabular models, three GNNs (HeteroSAGE, R-GCN, LightGCN), and Nvidia's Kumo Relational foundation model. The GNNs beat every heuristic by about 30% on cosponsor prediction. On bill advancement, a tabular model on the bill's own features is as strong as the GNNs. The next phase of the project is to make the graph earn its keep.
 
 ---
 
@@ -123,7 +123,7 @@ Graphs are trained full-batch, one graph per Congress, and the whole baseline no
 | HeteroSAGE | A bill's chances depend on its sponsor's and committees' track records; HeteroSAGE pulls those in by averaging over the bill's neighbours, and stays inductive for new sponsors |
 | R-GCN | "Sponsored by" and "referred to" carry very different meaning for advancement; R-GCN learns a separate transformation per edge type |
 | LightGCN-feat | Smooths the sponsors' and committees' history signals over the graph cheaply, to test whether a learned propagation is needed |
-| Kumo Relational (in progress) | A relational foundation model [6, 7] that learns from the database directly, a reference point for what automatic relational learning achieves |
+| Kumo Relational | A relational foundation model [6, 7] that learns from the database directly, a reference point for what automatic relational learning achieves |
 
 **Loss:** binary cross-entropy, no class weights. AUROC and AP depend only on the ranking, so reweighting the rare positives does not help.
 
@@ -140,22 +140,52 @@ Test Congress 117 has 12,953 bills, 2.8% positive. Learned models show the mean 
 | PairMLP (no message passing) | 0.792 | 0.801 [0.768, 0.829] | 0.135 |
 | HeteroSAGE | 0.801 | 0.805 [0.770, 0.833] | 0.151 |
 | R-GCN | 0.804 | 0.810 [0.776, 0.838] | 0.154 |
-| **LightGCN-feat** | 0.801 | **0.825** [0.797, 0.850] | **0.162** |
-| Kumo Relational | *to be added* | | |
+| **LightGCN-feat** | 0.801 | **0.825** [0.797, 0.850] | **0.162** | | |
 
 **What this shows.** The learned models clearly beat the heuristics (+0.08 AUROC over the committee report rate). But most of the signal sits in the bill's own features: who sponsors it, which committees it goes to, and how many original cosponsors it has. Gradient-boosted trees on those features alone reach 0.820. HeteroSAGE and R-GCN do not beat them, and LightGCN only ties them (+0.005, within noise). For this task, a tabular model is the bar the graph has to clear.
 
-### 5.4 Kumo Relational baseline (in progress)
+### 5.4 Kumo Relational baseline
 
-*Placeholder for the Kumo Relational foundation-model baseline [6, 7]* 
-For a fair comparison it must use the same definitions as the table above:
-- **Label:** reported out of committee within 180 days.
-- **Population:** HR, S, HJRES and SJRES bills.
-- **Split:** train on Congresses up to 115, validate on 116, test on 117.
-- **Censoring:** censored bills dropped, leaving 12,953 test bills.
-- **Prediction time:** the bill's introduction date, with no later information.
+We evaluated NVIDIA's open-weight Kumo Relational model (a structured-data foundation model for relational data) as an in-context-learning baseline for the **bill advancement** task. The model was **not trained or fine-tuned**. It was conditioned on labeled example bills and their related tables at inference time.  This baseline will be brought into alignment with the above models to ensure comparability.
 
-Results and per-bill predictions (for paired CIs) will be added here.
+### Setup
+
+- **Task:** predict whether an H.R. bill receives a `Calendars` action within 180 days of introduction.
+- **Query set:** H.R. bills of the 118th Congress introduced at least 180 days before the Congress ended: **9,029 bills, 404 positives (4.47% base rate)**.
+- **Context:** class-balanced labeled bills from [the 116th and 117th Congresses] (context size: [N] bills per run).
+- **Related tables:** [bill, sponsor, cosponsors, committee referral], restricted to information available at the prediction time (introduction + 7 days). `Calendars` actions and all later events are excluded to prevent leakage.
+- **Runs:** 5 runs with different random context samples (seeds [list]). Hardware: [GPU]. Model: `nvidia/Kumo-Relational` (`num_hops` = [1]).
+
+### Results
+
+| Metric | Mean (5 runs) | Random baseline | Lift over random |
+|---|---|---|---|
+| AUROC | **0.754** (95% CI [0.716, 0.791]) | 0.500 | n/a |
+| Average precision | **0.160** | 0.045 | 3.6x |
+| Recall@20 | 0.016 | 0.002 | 7.2x |
+| Recall@100 | 0.067 | 0.011 | 6.1x |
+| Recall@500 | 0.256 | 0.055 | 4.6x |
+
+Recall@k is the share of the 404 true positives found among the top k ranked bills. Its maximum possible value is k / 404 for k below 404 (24.8% at k = 100), so Recall@100 is best read with that ceiling in mind. On average, about 27 of the top 100 ranked bills (27%) were true positives, versus 4.5 expected at random.
+
+Per-run results:
+
+| Run | AUROC | AP | Recall@20 | Recall@100 | Recall@500 |
+|---|---|---|---|---|---|
+| 1 | 0.7128 | 0.1100 | 0.0173 | 0.0495 | 0.1757 |
+| 2 | 0.7883 | 0.1617 | 0.0099 | 0.0520 | 0.2475 |
+| 3 | 0.7729 | 0.1508 | 0.0124 | 0.0619 | 0.2649 |
+| 4 | 0.7349 | 0.2032 | 0.0149 | 0.1015 | 0.3119 |
+| 5 | 0.7596 | 0.1749 | 0.0248 | 0.0718 | 0.2797 |
+
+### Notes and caveats
+
+- **Confidence interval:** the AUROC interval is a t-interval across the 5 context samples (variance 0.0009), so it reflects sensitivity to which context bills were chosen. It is **not** the bootstrap-over-test-bills interval used for the other models, and the two should not be compared directly.
+- **Comparability:** this run uses a different cohort, label definition, and split from the baseline table above (random-prior AP 0.045 here versus 0.028 there). These results are **not directly comparable** to the other models. We will rerun Kumo Relational on the shared task definition for the final report.
+- **Run-to-run variation:** performance varies noticeably with the context sample (AUROC 0.713 to 0.788, Recall@100 0.050 to 0.102), which suggests that context selection and size are worth exploring.
+- **Reproducibility:** predictions and run metadata (package versions, checkpoint, seeds, context bill IDs, cutoffs) are cached, so results can be reproduced without re-running the model.
+- **Next steps 1:** align with the shared task definition and splits, run the cosponsorship task, and test larger and more targeted context sets and additional related tables.
+- **Next steps 2:** The above run was with num_hops = 1 (a bill sees only its direct neighbors (cosponsors, committees, sponsors).  We will complete additional runs with different values for num_hops {2,3} to add legislators behind cosponsorship and other bills that share a committee.
 
 ## 6. Cosponsor prediction
 
@@ -182,6 +212,7 @@ Results and per-bill predictions (for paired CIs) will be added here.
 | HeteroSAGE | Inductive: builds legislators from features and neighbours, so it can rank the 13% of test cosponsors who are new legislators |
 | R-GCN | Sponsoring, cosponsoring and sharing a committee are different relationships; R-GCN weighs each separately |
 | LightGCN-feat | Comes from recommender systems, where users and items form a bipartite graph, just like legislators and bills |
+| Kumo Relational | Cosponsorship can be framed as classification on (bill, legislator) pairs: label 1 if the legislator cosponsors the bill. Kumo does classification over rows with related tables, and that framing suits it. Related tables such as sponsor, committee membership, and prior cosponsorship history supply the relational signal. |
 
 **Loss:** a listwise softmax over each bill's **full** eligible pool. It optimizes the ranking directly, needs no negative sampling, and the pool already contains hard negatives (same party, same state). The pairwise BPR loss was 0.003–0.005 Recall@20 worse.
 
@@ -200,6 +231,7 @@ Prediction at introduction (*t0* = 0). Test Congress 117 has 5,101 bills with at
 | HeteroSAGE | 0.375 | 0.393 | 0.254 | 0.245 |
 | R-GCN | 0.374 | 0.394 | 0.257 | 0.245 |
 | **LightGCN-feat** | 0.371 | **0.400** | **0.260** | **0.249** |
+| Kumo Relational | in process | in process | in process | in process |
 
 **What this shows.**
 - **Every GNN beats the best heuristic by about 0.09 Recall@20**, roughly 30% better. In practice, the model's top 20 contains about 40% of a bill's future cosponsors, against 31% for the best heuristic.
@@ -221,6 +253,8 @@ On both tasks, almost all of the gain over heuristics comes from features the mo
 6. **Harder training signal.** Hard-negative mining and curriculum learning, as in PinSAGE, for cosponsor prediction.
 7. **Richer leak-free node features.** Better embeddings of the introduced title (only the version at introduction), and the policy areas of *finished* history bills.
 8. **Stacking and multi-task learning.** Feed GNN embeddings into gradient-boosted trees for advancement, and train both tasks jointly on the shared encoder.
+9. **Additional Hops in Kumo Relational** Reach deeper into the graph to gain signal on both tasks
+10. **Post train Kumo Relational** Instead of relying exclusively on in-context learning (ICL), train Kumo Relational on Congress.gov data to improve its performance.
 
 ### Ablations and other tests
 
@@ -230,8 +264,11 @@ On both tasks, almost all of the gain over heuristics comes from features the mo
 - **Answer the research question:** how much does the first week of support help? Compare predicting at day 0 with predicting at day 7.
 - **Break results down** by chamber, party, majority vs minority sponsors, and new vs returning legislators.
 - **Run the full protocol:** six rolling folds (112–117) with paired tests, then score the locked Congress 118 once.
-- **Add the Kumo Relational baseline** for bill advancement (Section 5.4).
-
+- **Flat vs Relational on Kumo Relational** Bill table only, versus adding related tables to reveal the value of relational data.
+- **Add-one/drop-one table on Kumo Relational** Sponsor, cosponsors, committee and later subjects and actions to reveal which tables carry the signal.
+- **num_hops on Kumo Relational** 1 versus 2 (and the automatic setting) to reveal whether info two steps away helps.
+- **Context size on Kumo Relational** 100, 250, 500, 1000, 2000 rows to reveal how performance scales with context and the ceiling given GPU limits.
+  
 ## Code
 
 - `data_processing/`: data download (`bulk_bill_download.sh`, `fetch_congress.py`) and the XML-to-Parquet ETL (`parsers.py`).
