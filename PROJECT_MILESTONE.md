@@ -2,7 +2,7 @@
 
 **Project milestone (first draft of the final report)** · CS224W, Fall 2026
 Andrew Lawlor (`adlawlor@stanford.edu`) · Alex Rivas (`alex502@stanford.edu`)
-
+test a change
 > **TL;DR.** We turned 20 years of U.S. Congress records (Congresses 108–118, about 154,000 bills and 1.9 million cosponsorships) into a leak-free temporal graph. On it we set up two prediction tasks: **will a bill advance out of committee**, and **who will cosponsor it next**. This milestone establishes strong baselines for both: simple heuristics, tabular models, and three GNNs (HeteroSAGE, R-GCN, LightGCN). The GNNs beat every heuristic by about 30% on cosponsor prediction. On bill advancement, a tabular model on the bill's own features is as strong as the GNNs. The next phase of the project is to make the graph earn its keep.
 
 ---
